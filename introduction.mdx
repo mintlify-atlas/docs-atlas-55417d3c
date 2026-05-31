@@ -1,0 +1,61 @@
+---
+title: "LLM Council: Multi-Model AI Deliberation System"
+sidebarTitle: "Introduction"
+description: "LLM Council groups multiple AI models into a deliberating panel that peer-reviews each other's answers and produces a single synthesized final response."
+---
+
+LLM Council is a local web application that replaces the single-model chatbot experience with a structured, multi-model deliberation pipeline. Instead of trusting one AI's answer, LLM Council sends your query to several frontier models in parallel, has each model anonymously evaluate the others' responses, and then directs a designated Chairman model to synthesize everything into one authoritative final answer — all in a familiar chat interface that looks and feels like ChatGPT.
+
+## The Problem It Solves
+
+Every LLM has blind spots, stylistic biases, and areas where it confidently produces incorrect information. When you query a single model, you have no external check on the quality of its response. LLM Council addresses this by treating each answer as a draft subject to peer review. Because reviews are conducted under anonymized labels (Response A, Response B, etc.), models cannot play favorites based on brand identity, which makes the evaluation more honest and the final synthesis more reliable.
+
+## The Three-Stage Pipeline
+
+Every message you send passes through three sequential stages, all run automatically on the backend:
+
+**Stage 1 — Parallel First Opinions**
+Your query is dispatched simultaneously to every model in the council. Responses are collected and displayed in a tab view so you can read each model's raw, uninfluenced answer individually.
+
+**Stage 2 — Anonymous Peer Review**
+Each council model receives the full set of Stage 1 responses, but the model identities are hidden behind neutral labels (Response A, B, C, D). Every model evaluates and ranks the responses by accuracy and insight. The frontend later de-anonymizes the labels so you can see who said what — while making clear the original evaluation was performed blindly.
+
+**Stage 3 — Chairman Synthesis**
+A designated Chairman model receives the original responses and the full peer-review feedback, then composes a single final answer that incorporates the strongest insights from the council. The Chairman's output is highlighted in the UI as the recommended response.
+
+## Key Design Decisions
+
+- **Anonymized review** — Stripping model identities during Stage 2 prevents self-promotion and sycophantic ranking, producing fairer evaluations.
+- **Full transparency** — Every raw output from every stage is exposed in the UI via tabs so you can inspect, audit, and validate the system's interpretation of each model's ranking.
+- **Local-first storage** — Conversations are stored as JSON files on your own machine under `data/conversations/`. No data is sent to any third-party service beyond the model queries themselves.
+- **Graceful degradation** — If one model fails, the pipeline continues with the remaining successful responses rather than blocking the entire request.
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI (Python 3.10+), async httpx, Uvicorn on **port 8001** |
+| Frontend | React 19 + Vite, react-markdown, served on **port 5173** |
+| Model Access | OpenRouter API (single key, access to all providers) |
+| Storage | JSON files in `data/conversations/` |
+| Python tooling | `uv` for dependency and environment management |
+| JS tooling | `npm` for frontend dependencies |
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install dependencies, configure your API key, and have the app running in under five minutes.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration">
+    Learn how to customize council members, the Chairman model, storage paths, and CORS settings.
+  </Card>
+  <Card title="How It Works" icon="diagram-project" href="/how-it-works/overview">
+    Deep dive into the three-stage pipeline, anonymization strategy, and ranking aggregation.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the FastAPI endpoints for conversations, message sending, and streaming SSE responses.
+  </Card>
+</CardGroup>
+
+<Note>
+  LLM Council was created as a Saturday hack by Andrej Karpathy to explore and evaluate multiple LLMs side by side while reading books with AI. The project is provided as-is for inspiration — there is no planned ongoing support or roadmap. If you want to extend it, ask your favorite LLM to modify it however you like.
+</Note>

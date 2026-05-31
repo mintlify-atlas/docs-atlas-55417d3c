@@ -1,0 +1,178 @@
+---
+title: "Send Messages and Run the Council Process"
+sidebarTitle: "Messages"
+description: "Send a user message to run all 3 council stages: model responses, peer review, and chairman synthesis. Returns the complete result in one blocking request."
+---
+
+The message endpoint is the core of LLM Council. Posting a user message kicks off a complete three-stage deliberation: all council models answer independently (Stage 1), each model then anonymously evaluates and ranks every other model's response (Stage 2), and finally a chairman model synthesizes a definitive answer informed by the rankings (Stage 3). The endpoint blocks until all three stages have completed and returns the full result in a single JSON response.
+
+<Tip>
+  For a better user experience with real-time progress indicators, use the [streaming endpoint](/api/streaming) instead. It emits a Server-Sent Event as each stage finishes, so your UI can update incrementally rather than waiting for the entire process to complete.
+</Tip>
+
+---
+
+## Send a Message
+
+`POST /api/conversations/{conversation_id}/message`
+
+Sends a user message and runs the complete 3-stage council process synchronously. Expect this call to take anywhere from **30 to 120+ seconds** depending on how many models are configured and their individual response latencies. All council models are queried in parallel within each stage, but Stage 2 cannot begin until Stage 1 is finished.
+
+### Path Parameters
+
+<ParamField path="conversation_id" type="string" required>
+  UUID of an existing conversation. Create one first with `POST /api/conversations`.
+</ParamField>
+
+### Request Body
+
+<ParamField body="content" type="string" required>
+  The user's question or prompt. This text is sent to all council models in Stage 1.
+</ParamField>
+
+<CodeGroup>
+```bash curl
+curl -X POST \
+  http://localhost:8001/api/conversations/a1b2c3d4-e5f6-7890-abcd-ef1234567890/message \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "What is the difference between supervised and unsupervised learning?"}'
+```
+
+```javascript JavaScript
+const result = await api.sendMessage(conversationId, 'What is the difference between supervised and unsupervised learning?');
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="stage1" type="array" required>
+  One entry per council model, containing that model's raw answer to the user's question.
+
+  <Expandable title="Stage 1 item fields">
+    <ResponseField name="model" type="string">
+      The OpenRouter model identifier, e.g. `"openai/gpt-5.1"`.
+    </ResponseField>
+    <ResponseField name="response" type="string">
+      The model's full text response to the user's question.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="stage2" type="array" required>
+  One entry per council model, containing that model's peer evaluation. During Stage 2, responses are anonymized as "Response A", "Response B", etc., so models cannot identify their own output or other models' outputs.
+
+  <Expandable title="Stage 2 item fields">
+    <ResponseField name="model" type="string">
+      The model that performed this evaluation.
+    </ResponseField>
+    <ResponseField name="ranking" type="string">
+      Raw evaluation text from the model, including analysis of each response followed by a `FINAL RANKING:` section.
+    </ResponseField>
+    <ResponseField name="parsed_ranking" type="array">
+      Ordered list of response labels extracted from the raw ranking text, e.g. `["Response B", "Response A", "Response C"]`. Index 0 is the model's top pick.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="stage3" type="object" required>
+  The chairman model's final synthesized answer, produced after reviewing all Stage 1 responses and Stage 2 rankings.
+
+  <Expandable title="Stage 3 fields">
+    <ResponseField name="model" type="string">
+      The chairman model identifier.
+    </ResponseField>
+    <ResponseField name="response" type="string">
+      The chairman's synthesized final answer.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="metadata" type="object" required>
+  Computed metadata that is **not** persisted to storage. It is only available in this API response.
+
+  <Expandable title="Metadata fields">
+    <ResponseField name="label_to_model" type="object">
+      Maps anonymous labels back to model identifiers, e.g. `{"Response A": "openai/gpt-5.1", "Response B": "anthropic/claude-sonnet-4.5"}`. Use this to de-anonymize Stage 2 evaluations for display.
+    </ResponseField>
+    <ResponseField name="aggregate_rankings" type="array">
+      Sorted list of per-model ranking statistics, computed by averaging each model's position across all peer evaluations. Lower `average_rank` is better (rank 1 = best).
+
+      <Expandable title="Aggregate ranking item fields">
+        <ResponseField name="model" type="string">
+          Model identifier.
+        </ResponseField>
+        <ResponseField name="average_rank" type="number">
+          Mean rank position across all evaluations. A value of `1.0` means every evaluator ranked this model first.
+        </ResponseField>
+        <ResponseField name="rankings_count" type="integer">
+          Number of peer evaluations that included this model.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|--------|-------------|
+| `404` | The `conversation_id` does not correspond to a stored conversation. |
+
+<Note>
+  If this is the **first message** in the conversation, a title is generated automatically and saved to disk. Subsequent calls to `GET /api/conversations/{id}` will return the updated title. The title is generated before the council stages begin in the blocking endpoint — in the streaming endpoint it runs in parallel with Stage 1.
+</Note>
+
+<Warning>
+  If individual council models fail during Stage 1 or Stage 2, the system degrades gracefully — it continues with the models that responded successfully rather than failing the entire request. The returned arrays may therefore have fewer entries than the total number of configured models.
+</Warning>
+
+### Example Response
+
+```json
+{
+  "stage1": [
+    {
+      "model": "openai/gpt-5.1",
+      "response": "Supervised learning uses labeled data where each training example has a known output..."
+    },
+    {
+      "model": "anthropic/claude-sonnet-4.5",
+      "response": "The key distinction is whether your training data includes ground-truth labels..."
+    }
+  ],
+  "stage2": [
+    {
+      "model": "openai/gpt-5.1",
+      "ranking": "Response A provides comprehensive coverage of the theory... Response B is more practical...\n\nFINAL RANKING:\n1. Response B\n2. Response A",
+      "parsed_ranking": ["Response B", "Response A"]
+    },
+    {
+      "model": "anthropic/claude-sonnet-4.5",
+      "ranking": "Both responses address the core question... Response A is clearer for beginners...\n\nFINAL RANKING:\n1. Response A\n2. Response B",
+      "parsed_ranking": ["Response A", "Response B"]
+    }
+  ],
+  "stage3": {
+    "model": "google/gemini-3-pro-preview",
+    "response": "Based on the council's evaluation, here is a synthesized answer to your question..."
+  },
+  "metadata": {
+    "label_to_model": {
+      "Response A": "openai/gpt-5.1",
+      "Response B": "anthropic/claude-sonnet-4.5"
+    },
+    "aggregate_rankings": [
+      {
+        "model": "anthropic/claude-sonnet-4.5",
+        "average_rank": 1.25,
+        "rankings_count": 4
+      },
+      {
+        "model": "openai/gpt-5.1",
+        "average_rank": 1.75,
+        "rankings_count": 4
+      }
+    ]
+  }
+}
+```

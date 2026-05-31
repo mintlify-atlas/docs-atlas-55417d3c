@@ -1,0 +1,134 @@
+---
+title: "Stage 3: Chairman Synthesis of the Final Answer"
+sidebarTitle: "Stage 3"
+description: "Stage 3 gives the Chairman model all Stage 1 responses and Stage 2 peer rankings, and it synthesizes them into one authoritative final answer for the user."
+---
+
+Stage 3 is the council's closing argument. A single designated model — the Chairman — receives a comprehensive brief containing every individual response from Stage 1 and every written peer evaluation from Stage 2, then produces one final answer that draws on the collective insight of the entire council. The Chairman's output is the response displayed prominently to the user.
+
+## What the Chairman Sees
+
+The `stage3_synthesize_final` function in `council.py` assembles a structured prompt from all prior stage outputs before making a single model call:
+
+```python
+async def stage3_synthesize_final(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+    stage2_results: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    stage1_text = "\n\n".join([
+        f"Model: {result['model']}\nResponse: {result['response']}"
+        for result in stage1_results
+    ])
+
+    stage2_text = "\n\n".join([
+        f"Model: {result['model']}\nRanking: {result['ranking']}"
+        for result in stage2_results
+    ])
+
+    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided
+responses to a user's question, and then ranked each other's responses.
+
+Original Question: {user_query}
+
+STAGE 1 - Individual Responses:
+{stage1_text}
+
+STAGE 2 - Peer Rankings:
+{stage2_text}
+
+Your task as Chairman is to synthesize all of this information into a single, comprehensive,
+accurate answer to the user's original question. Consider:
+- The individual responses and their insights
+- The peer rankings and what they reveal about response quality
+- Any patterns of agreement or disagreement
+
+Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+
+    messages = [{"role": "user", "content": chairman_prompt}]
+    response = await query_model(CHAIRMAN_MODEL, messages)
+    ...
+```
+
+The Chairman is explicitly instructed to weigh three things:
+
+1. **Individual responses and their insights** — the actual factual content produced in Stage 1.
+2. **Peer rankings and what they reveal about quality** — not just the order, but the written justifications from Stage 2 that explain *why* a response was ranked where it was.
+3. **Patterns of agreement or disagreement** — whether models converged on the same ranking or diverged significantly, which itself signals how confident the council is in its judgment.
+
+## Return Format and Fallback
+
+`stage3_synthesize_final` returns a simple two-key dictionary:
+
+```python
+{
+    "model": "google/gemini-3-pro-preview",
+    "response": "Based on the council's deliberations …"
+}
+```
+
+If `query_model` returns `None` — meaning the Chairman model failed to respond — a hardcoded error string is returned instead of raising an exception:
+
+```python
+if response is None:
+    return {
+        "model": CHAIRMAN_MODEL,
+        "response": "Error: Unable to generate final synthesis."
+    }
+```
+
+This ensures the API always returns a well-formed Stage 3 object. The frontend can display the error message in the same green-tinted synthesis card rather than crashing the UI.
+
+## Chairman Model Configuration
+
+The Chairman is identified by `CHAIRMAN_MODEL` in `config.py`:
+
+```python
+CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+```
+
+The Chairman can be the same model that sits on the council (as in the default configuration above, where Gemini also appears in `COUNCIL_MODELS`) or an entirely separate model. There is no architectural requirement that the Chairman be distinct — but using the same model means it will be both an author of one Stage 1 response *and* the synthesizer of all responses.
+
+<Tip>
+  Choosing a model with strong long-context reasoning as Chairman generally produces better synthesis, because the Chairman prompt includes the full text of every Stage 1 response and every Stage 2 evaluation — a potentially large context window. Models like Gemini Pro handle this well.
+</Tip>
+
+## API Metadata
+
+The full `run_full_council` function packages the Chairman's output alongside structured metadata:
+
+```python
+metadata = {
+    "label_to_model": label_to_model,    # {"Response A": "openai/gpt-5.1", …}
+    "aggregate_rankings": aggregate_rankings  # [{model, average_rank, rankings_count}, …]
+}
+
+return stage1_results, stage2_results, stage3_result, metadata
+```
+
+`label_to_model` is needed by the frontend to de-anonymize the Stage 2 display. `aggregate_rankings` powers the leaderboard shown below the raw evaluations.
+
+<Warning>
+  Both `label_to_model` and `aggregate_rankings` are **ephemeral metadata**. They are included in the live API response but are not written to the JSON conversation store on disk (`data/conversations/`). If a conversation is reloaded from storage, the stage text is present but the metadata will not be available.
+</Warning>
+
+## Frontend Display
+
+The `Stage3` React component renders the Chairman's response with a **green-tinted background** (`#f0fff0`) to visually separate the synthesized final answer from the per-model tabs in Stages 1 and 2:
+
+```jsx
+// Stage3.jsx
+<div className="stage stage3">
+  <h3 className="stage-title">Stage 3: Final Council Answer</h3>
+  <div className="final-response">
+    <div className="chairman-label">
+      Chairman: {finalResponse.model.split('/')[1] || finalResponse.model}
+    </div>
+    <div className="final-text markdown-content">
+      <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
+    </div>
+  </div>
+</div>
+```
+
+The Chairman's short model name is displayed as a label above the response text, making it clear which model produced the synthesis. The full response is rendered as Markdown, so structured output like numbered lists, code blocks, or headers displays correctly.

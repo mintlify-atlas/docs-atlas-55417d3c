@@ -1,0 +1,82 @@
+---
+title: "Configuring OpenRouter API Key for Multi-Model Access"
+sidebarTitle: "OpenRouter Setup"
+description: "Create an OpenRouter account, load credits, and add your API key so LLM Council can query every council member and Chairman model from one place."
+---
+
+LLM Council talks to every council member — OpenAI, Anthropic, Google, xAI, Meta, and more — through a single API endpoint provided by [OpenRouter](https://openrouter.ai). Instead of creating and managing separate API keys for each AI provider, you purchase credits on OpenRouter and use one key for everything. This guide walks through account creation, key configuration, and how the key flows through the application.
+
+## What OpenRouter provides
+
+OpenRouter is a unified API gateway that normalizes hundreds of LLMs behind a single `POST https://openrouter.ai/api/v1/chat/completions` endpoint. Every request you make to LLM Council — council member queries in Stage 1 and Stage 2, the Chairman call in Stage 3, and background title generation — goes to this one endpoint with an `Authorization: Bearer <your-key>` header. OpenRouter handles routing to the underlying provider, billing, and rate limiting transparently.
+
+## Setting up your account and key
+
+<Steps>
+
+### Sign up at OpenRouter
+
+Go to [openrouter.ai](https://openrouter.ai) and create a free account. No model-specific agreements are needed — OpenRouter handles provider terms on your behalf.
+
+### Purchase credits or enable auto top-up
+
+Navigate to the **Credits** section of your dashboard. You can add a one-time credit balance or enable automatic top-up so your council never gets interrupted mid-conversation. Frontier models (GPT-5, Claude Opus, Gemini Pro) cost more per call than mid-tier models; the [model list](https://openrouter.ai/models) shows per-token pricing for every option.
+
+### Create an API key
+
+Go to the **Keys** section and click **Create Key**. Give it a descriptive name (e.g., `llm-council-local`). The key will be displayed once — copy it now. It begins with `sk-or-v1-`.
+
+### Create a `.env` file in the project root
+
+In the root of the `llm-council` repository, create a file named `.env` with the following content:
+
+```bash .env
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+```
+
+Replace `sk-or-v1-your-key-here` with the key you copied in the previous step.
+
+<Note>
+The `.env` file is listed in `.gitignore` and will not be committed to version control. Never paste your API key directly into `config.py` or any other tracked file.
+</Note>
+
+### Start (or restart) the backend
+
+The key is loaded at startup via `python-dotenv` in `backend/config.py`:
+
+```python backend/config.py
+from dotenv import load_dotenv
+load_dotenv()
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+```
+
+If the backend is already running, stop it and restart it so it picks up the new environment variable:
+
+```bash
+uv run python -m backend.main
+```
+
+</Steps>
+
+## Credit consumption per message
+
+Every user message triggers a fixed number of model calls. With `N` council members:
+
+| Stage | Calls | Description |
+|---|---|---|
+| Stage 1 | N | Council members answer the question in parallel |
+| Stage 2 | N | Council members rank each other's answers in parallel |
+| Stage 3 | 1 | Chairman synthesizes the final response |
+| Title generation | 1 | `google/gemini-2.5-flash` generates a 3–5 word title (first message only) |
+| **Total** | **2N + 2** | Per message (2N + 1 for follow-up messages) |
+
+With the default 4-model council, that is **10 calls** on the first message and **9 calls** on every subsequent message in the same conversation.
+
+<Tip>
+You can verify your key is active and check your remaining credits at any time from the OpenRouter dashboard, or by calling the OpenRouter keys API directly. The dashboard also shows a per-model breakdown of your usage so you can see exactly which council members are consuming the most credits.
+</Tip>
+
+<Warning>
+If `OPENROUTER_API_KEY` is missing or invalid, every model query will fail with an HTTP 401 authentication error. Stage 1 will return zero responses, and LLM Council will return: `"All models failed to respond. Please try again."` — check the backend terminal output for the raw error detail if this happens.
+</Warning>

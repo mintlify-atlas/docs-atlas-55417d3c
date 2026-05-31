@@ -1,0 +1,69 @@
+---
+title: "LLM Council REST API Reference Overview"
+sidebarTitle: "Overview"
+description: "LLM Council's JSON REST API runs on localhost:8001, requires no auth, and exposes endpoints for conversations, messaging, and SSE streaming."
+---
+
+LLM Council exposes a lightweight REST API through its FastAPI backend, running on `http://localhost:8001`. All endpoints accept and return JSON, require no authentication, and are designed exclusively for local use. CORS is pre-configured to allow requests from `http://localhost:5173` (Vite dev server) and `http://localhost:3000`, so the bundled React frontend works out of the box without any additional setup.
+
+<Note>
+  The API is **stateful** — you must create a conversation before you can send messages to it. Every message endpoint requires a valid `conversation_id` obtained from `POST /api/conversations`.
+</Note>
+
+## Base URL
+
+```
+http://localhost:8001
+```
+
+All resource endpoints are prefixed with `/api/`. The single exception is the root health check at `/`.
+
+## Request & Response Format
+
+Every request body must be sent as JSON with the `Content-Type: application/json` header. All successful responses are returned as JSON. HTTP status codes follow standard conventions: `200` for success, `404` when a resource is not found.
+
+## Authentication
+
+No authentication is required. The server is intentionally designed for local-only use and does not implement API keys, tokens, or session management.
+
+## Health Check
+
+Ping the root endpoint to verify the backend is running before making any API calls.
+
+```bash curl example
+curl http://localhost:8001/
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "service": "LLM Council API"
+}
+```
+
+## Endpoint Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Health check — confirms the backend is alive |
+| `GET` | `/api/conversations` | List all conversations, newest first |
+| `POST` | `/api/conversations` | Create a new empty conversation |
+| `GET` | `/api/conversations/{id}` | Get a full conversation with all messages |
+| `POST` | `/api/conversations/{id}/message` | Send a message and run all 3 council stages (blocking) |
+| `POST` | `/api/conversations/{id}/message/stream` | Send a message and receive stage updates via SSE |
+
+## Explore the API
+
+<CardGroup cols={3}>
+  <Card title="Conversations" icon="comments" href="/api/conversations">
+    Create, list, and retrieve conversations along with their full message history.
+  </Card>
+  <Card title="Messages" icon="paper-plane" href="/api/messages">
+    Send a message and block until all three council stages have completed.
+  </Card>
+  <Card title="Streaming" icon="bolt" href="/api/streaming">
+    Receive real-time stage-by-stage progress via Server-Sent Events.
+  </Card>
+</CardGroup>

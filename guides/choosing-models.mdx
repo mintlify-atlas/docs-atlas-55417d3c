@@ -1,0 +1,97 @@
+---
+title: "Configuring Council Member Models and the Chairman"
+sidebarTitle: "Choosing Models"
+description: "Learn how to select council member models and a Chairman for LLM Council, balancing provider diversity, capability, cost, and speed for the best results."
+---
+
+The models that participate in your council — and the Chairman that synthesizes their work — are the most impactful configuration decision you can make in LLM Council. Getting this right means balancing provider diversity, reasoning capability, cost per query, and response speed. This guide walks through everything you need to know to make an informed choice.
+
+## Where the configuration lives
+
+All model selection is controlled by two constants in `backend/config.py`:
+
+```python backend/config.py
+# Council members - list of OpenRouter model identifiers
+COUNCIL_MODELS = [
+    "openai/gpt-5.1",
+    "google/gemini-3-pro-preview",
+    "anthropic/claude-sonnet-4.5",
+    "x-ai/grok-4",
+]
+
+# Chairman model - synthesizes final response
+CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+```
+
+Model identifiers follow the OpenRouter `provider/model-name` format. You can browse every available model at [openrouter.ai/models](https://openrouter.ai/models) — each listing shows pricing, context length, and capability notes.
+
+<Warning>
+After editing `backend/config.py`, you must restart the backend for your changes to take effect. The file is read once at startup and not hot-reloaded.
+</Warning>
+
+## Guidelines for choosing council members
+
+### Diversity of providers
+
+Mixing models from different providers is the single most valuable thing you can do. OpenAI, Anthropic, Google, and xAI each have distinct training approaches, knowledge cutoffs, and stylistic tendencies. When a council member reviews its peers' answers in Stage 2, a model from a different lineage is less likely to share the same blindspot. A council of four models all from the same provider gives you much less signal than one drawn from four different providers.
+
+### Capability level
+
+Council members perform peer review in Stage 2, which requires genuine critical reasoning — not just summarization. Using frontier or near-frontier models produces more useful rankings because they can actually identify weaknesses in each other's responses. Smaller or distilled models may pass Stage 1 adequately but give shallow or sycophantic rankings in Stage 2, which degrades the Chairman's synthesis.
+
+### Cost vs. quality tradeoff
+
+With `N` council members, each user message triggers exactly `2N + 2` model calls:
+
+- **Stage 1** — `N` calls (one per council member, answering the question)
+- **Stage 2** — `N` calls (one per council member, ranking the anonymized responses)
+- **Stage 3** — `1` Chairman call (synthesizing the final answer)
+- **Title generation** — `1` call (only on the first message of a new conversation)
+
+With the default four-model council, that's **10 calls per message** (8 council calls + 1 Chairman + 1 title). Frontier models can cost several cents per call, so a council of four premium models may cost $0.20–$0.50 per question. Swapping one or two members for capable mid-tier models is a practical way to reduce costs without dramatically reducing quality.
+
+### Speed
+
+Because Stages 1 and 2 are each run in parallel using `asyncio.gather()`, the wall-clock time for each stage equals the **slowest model in the council**, not the sum of all models. Adding a fifth council member that is consistently fast costs almost no extra latency. The only sequential bottleneck is Stage 3, which waits for Stages 1 and 2 to fully complete before the Chairman starts.
+
+## Chairman model selection
+
+The Chairman receives every council member's full Stage 1 response plus every council member's full Stage 2 evaluation and ranking. Its job is to synthesize all of that into a single, authoritative final answer. This requires strong instruction-following and reasoning capability — the Chairman should be at least as capable as your strongest council member.
+
+Key points to keep in mind:
+
+- **The Chairman can be the same model as a council member.** When that happens, the model will see both its own original response (from Stage 1) and the other models' peer rankings of that response. There is no duplicate call; the Stage 3 prompt is distinct from the Stage 1 and Stage 2 prompts.
+- **Strong reasoning models make the best Chairmen.** Models optimized for synthesis and instruction-following (such as large Gemini, Claude, or GPT variants) tend to produce coherent final answers that correctly weight the peer rankings.
+- **The default is `google/gemini-3-pro-preview`**, which offers a large context window — important when four council members each produce lengthy Stage 1 and Stage 2 responses that all need to fit into a single Chairman prompt.
+
+## Example: swapping to a different council
+
+```python backend/config.py
+COUNCIL_MODELS = [
+    "openai/o3",
+    "anthropic/claude-opus-4",
+    "google/gemini-2.5-pro",
+    "meta-llama/llama-4-maverick",
+]
+CHAIRMAN_MODEL = "openai/o3"
+```
+
+This configuration uses four frontier models from four distinct providers and promotes `openai/o3` (a strong reasoning model) to Chairman.
+
+<Tip>
+Title generation always uses `google/gemini-2.5-flash`, hardcoded in `generate_conversation_title()` in `backend/council.py`. This model was chosen for speed and low cost because titles are generated in the background. If you want to change the title model, edit that function directly.
+</Tip>
+
+## Frequently asked questions
+
+<Accordion title="Can I use fewer than 4 council models?">
+Yes. The minimum is 2 council members. Stage 2 asks each model to rank the anonymized responses, and you need at least 2 responses for ranking to be meaningful. A 2-model council still produces a valid peer review — `Response A` and `Response B` — though the aggregate rankings will have less statistical weight than a 4-model council.
+</Accordion>
+
+<Accordion title="Can I use a non-chat or completion-only model?">
+Stick to instruction-following chat models. The Stage 2 prompt requires each council member to produce a structured evaluation ending with a `FINAL RANKING:` section followed by a numbered list. Completion models or embedding models will not produce the expected format, and the ranking parser will either return an empty list or fall back to a best-guess regex extraction, degrading Stage 2 reliability.
+</Accordion>
+
+<Accordion title="What if a model fails mid-council?">
+LLM Council degrades gracefully. In Stage 1, any model that returns an error or times out is simply omitted from the results — only successful responses are carried forward. Stage 2 then ranks whichever responses are available. The council can complete successfully even if one or two members fail, as long as at least one Stage 1 response exists for the Chairman to synthesize.
+</Accordion>

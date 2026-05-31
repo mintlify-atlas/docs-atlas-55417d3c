@@ -1,0 +1,217 @@
+---
+title: "Stream Council Stages with Server-Sent Events"
+sidebarTitle: "Streaming"
+description: "Use the SSE streaming endpoint to receive real-time stage-by-stage progress updates from the LLM Council deliberation as each stage completes."
+---
+
+The streaming endpoint runs the same three-stage council process as the blocking message endpoint, but instead of waiting for everything to finish it emits a Server-Sent Event (SSE) as each stage begins and completes. This lets your frontend update the UI progressively — showing Stage 1 model responses as soon as they arrive, then the peer rankings, then the chairman's final answer — without holding open a long-polling request or managing complex state on the client.
+
+<Tip>
+  The LLM Council frontend uses this endpoint by default for its chat UI. See `frontend/src/api.js` — specifically the `sendMessageStream` function — for a complete reference implementation including event dispatch and error handling.
+</Tip>
+
+---
+
+## Stream a Message
+
+`POST /api/conversations/{conversation_id}/message/stream`
+
+Sends a user message and streams back stage progress as SSE. The response `Content-Type` is `text/event-stream`, and the server sets `Cache-Control: no-cache` and `Connection: keep-alive` to prevent buffering by intermediary proxies.
+
+<Warning>
+  SSE connections are long-lived. Stage 1 (all models answering in parallel) and Stage 2 (all models ranking in parallel) together can take **60–120 seconds** with slower models. Make sure your HTTP client, reverse proxy, or load balancer does not impose a read timeout shorter than this window, or the connection will be cut before all events arrive.
+</Warning>
+
+### Path Parameters
+
+<ParamField path="conversation_id" type="string" required>
+  UUID of an existing conversation. Create one first with `POST /api/conversations`.
+</ParamField>
+
+### Request Body
+
+<ParamField body="content" type="string" required>
+  The user's question or prompt text.
+</ParamField>
+
+---
+
+## SSE Event Types
+
+Each event arrives as a single `data:` line containing a JSON payload, followed by a blank line. The `type` field in the payload identifies what stage the event corresponds to.
+
+### `stage1_start`
+
+Emitted immediately when Stage 1 begins. All council models are queried in parallel from this point forward.
+
+```json
+{"type": "stage1_start"}
+```
+
+### `stage1_complete`
+
+Emitted when all council models have returned their responses. The `data` array contains one entry per model that responded successfully.
+
+```json
+{
+  "type": "stage1_complete",
+  "data": [
+    {"model": "openai/gpt-5.1", "response": "Supervised learning uses labeled data..."},
+    {"model": "anthropic/claude-sonnet-4.5", "response": "The key distinction is..."}
+  ]
+}
+```
+
+### `stage2_start`
+
+Emitted immediately when Stage 2 (peer review) begins. Responses from Stage 1 have been anonymized and are being distributed to evaluators.
+
+```json
+{"type": "stage2_start"}
+```
+
+### `stage2_complete`
+
+Emitted when all peer evaluations are collected and aggregate rankings computed. This event includes the `metadata` block — the only place in the SSE stream where `label_to_model` and `aggregate_rankings` appear.
+
+```json
+{
+  "type": "stage2_complete",
+  "data": [
+    {
+      "model": "openai/gpt-5.1",
+      "ranking": "Response B is more thorough...\n\nFINAL RANKING:\n1. Response B\n2. Response A",
+      "parsed_ranking": ["Response B", "Response A"]
+    }
+  ],
+  "metadata": {
+    "label_to_model": {
+      "Response A": "openai/gpt-5.1",
+      "Response B": "anthropic/claude-sonnet-4.5"
+    },
+    "aggregate_rankings": [
+      {"model": "anthropic/claude-sonnet-4.5", "average_rank": 1.25, "rankings_count": 4},
+      {"model": "openai/gpt-5.1", "average_rank": 1.75, "rankings_count": 4}
+    ]
+  }
+}
+```
+
+<Note>
+  `label_to_model` and `aggregate_rankings` are included **only** in the `stage2_complete` event. They are not present in `stage1_complete` or any other event, and they are not persisted to the conversation file on disk.
+</Note>
+
+### `stage3_start`
+
+Emitted when the chairman model begins synthesizing its final answer.
+
+```json
+{"type": "stage3_start"}
+```
+
+### `stage3_complete`
+
+Emitted when the chairman's synthesized response is ready.
+
+```json
+{
+  "type": "stage3_complete",
+  "data": {
+    "model": "google/gemini-3-pro-preview",
+    "response": "Based on the council's evaluation, here is a synthesized answer..."
+  }
+}
+```
+
+### `title_complete`
+
+Emitted **only on the first message** of a conversation, once the auto-generated title has been saved to disk. Title generation runs in parallel with Stage 1, so this event typically arrives around the same time as `stage2_start`.
+
+```json
+{
+  "type": "title_complete",
+  "data": {"title": "Supervised vs. unsupervised learning"}
+}
+```
+
+### `complete`
+
+Emitted after all stages have finished and the full assistant message (stages 1–3) has been written to the conversation file. The stream closes after this event.
+
+```json
+{"type": "complete"}
+```
+
+### `error`
+
+Emitted if an unhandled exception occurs during processing. The stream closes after this event. Note that individual model failures do **not** trigger this event — only a failure of the overall pipeline does.
+
+```json
+{"type": "error", "message": "Unexpected error during council processing"}
+```
+
+---
+
+## Wire Format
+
+SSE payloads are newline-delimited. Each event is a `data:` line followed by a blank line:
+
+```
+data: {"type": "stage1_start"}
+
+data: {"type": "stage1_complete", "data": [{"model": "openai/gpt-5.1", "response": "..."}]}
+
+data: {"type": "stage2_start"}
+
+data: {"type": "stage2_complete", "data": [...], "metadata": {"label_to_model": {}, "aggregate_rankings": []}}
+
+data: {"type": "stage3_start"}
+
+data: {"type": "stage3_complete", "data": {"model": "google/gemini-3-pro-preview", "response": "..."}}
+
+data: {"type": "title_complete", "data": {"title": "Generated title"}}
+
+data: {"type": "complete"}
+
+```
+
+---
+
+## Client Examples
+
+<CodeGroup>
+```javascript JavaScript (Fetch API)
+const response = await fetch(
+  'http://localhost:8001/api/conversations/<id>/message/stream',
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: 'What causes inflation?' }),
+  }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value);
+  for (const line of chunk.split('\n')) {
+    if (line.startsWith('data: ')) {
+      const event = JSON.parse(line.slice(6));
+      console.log(event.type, event);
+    }
+  }
+}
+```
+
+```bash curl
+curl -X POST \
+  http://localhost:8001/api/conversations/a1b2c3d4-e5f6-7890-abcd-ef1234567890/message/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "What causes inflation?"}' \
+  --no-buffer
+```
+</CodeGroup>

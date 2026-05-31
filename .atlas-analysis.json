@@ -1,0 +1,83 @@
+{
+  "projectType": "saas",
+  "projectName": "LLM Council",
+  "projectDescription": "A local web app that routes your questions to multiple LLMs simultaneously, has them anonymously peer-review each other's answers, and synthesizes a final response via a designated Chairman model.",
+  "theme": "luma",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#0a0a0a",
+  "darkColor": "#c7c7c7",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "How It Works",
+            "pages": [
+              "how-it-works/overview",
+              "how-it-works/stage1-responses",
+              "how-it-works/stage2-rankings",
+              "how-it-works/stage3-synthesis"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/choosing-models",
+              "guides/openrouter-setup",
+              "guides/conversation-storage"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Conversations",
+            "pages": [
+              "api/overview",
+              "api/conversations",
+              "api/messages",
+              "api/streaming"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Parallel multi-LLM querying via OpenRouter in Stage 1",
+    "Anonymized peer-review and ranking in Stage 2 to prevent model bias",
+    "Chairman LLM synthesizes a final consensus answer in Stage 3",
+    "Aggregate ranking scores computed across all peer evaluations",
+    "Server-Sent Events (SSE) streaming for real-time stage-by-stage updates",
+    "JSON-based conversation persistence with auto-generated titles",
+    "Tab view UI for inspecting every individual model response and raw ranking text",
+    "Configurable council members and chairman via a single config file"
+  ],
+  "publicApiSurface": [
+    "GET /api/conversations",
+    "POST /api/conversations",
+    "GET /api/conversations/{conversation_id}",
+    "POST /api/conversations/{conversation_id}/message",
+    "POST /api/conversations/{conversation_id}/message/stream",
+    "stage1_collect_responses(user_query)",
+    "stage2_collect_rankings(user_query, stage1_results)",
+    "stage3_synthesize_final(user_query, stage1_results, stage2_results)",
+    "calculate_aggregate_rankings(stage2_results, label_to_model)",
+    "parse_ranking_from_text(ranking_text)",
+    "run_full_council(user_query)",
+    "generate_conversation_title(user_query)",
+    "query_model(model, messages, timeout)",
+    "query_models_parallel(models, messages)"
+  ]
+}

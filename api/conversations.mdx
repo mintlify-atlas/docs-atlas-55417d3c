@@ -1,0 +1,180 @@
+---
+title: "Conversations API: Create, List, and Retrieve"
+sidebarTitle: "Conversations"
+description: "Manage LLM Council conversation sessions — list all past conversations, create new ones, and retrieve full message history by conversation ID."
+---
+
+Conversations are the top-level resource in LLM Council. Every exchange between a user and the council lives inside a conversation, which persists to disk as a JSON file in the backend's data directory. Before sending any messages you must first create a conversation to obtain a `conversation_id`. The three endpoints below cover the full lifecycle: creating a session, browsing all sessions, and loading a specific session with its complete message history.
+
+---
+
+## List Conversations
+
+<CodeGroup>
+```bash curl
+curl http://localhost:8001/api/conversations
+```
+
+```javascript JavaScript
+const conversations = await api.listConversations();
+```
+</CodeGroup>
+
+`GET /api/conversations` returns metadata for every stored conversation, sorted newest first. No request body or query parameters are accepted.
+
+### Response
+
+An array of conversation metadata objects. Full message content is omitted from this endpoint — use `GET /api/conversations/{conversation_id}` to load messages.
+
+<ResponseField name="id" type="string" required>
+  UUID that uniquely identifies the conversation. Use this value as `conversation_id` in all subsequent requests.
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  ISO 8601 datetime string (UTC) recording when the conversation was created, e.g. `"2024-01-15T10:30:00"`.
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Human-readable title. Defaults to `"New Conversation"` and is replaced with an auto-generated title after the first message is sent.
+</ResponseField>
+
+<ResponseField name="message_count" type="integer" required>
+  Total number of messages in the conversation (both user and assistant turns).
+</ResponseField>
+
+**Example response:**
+
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "created_at": "2024-01-15T10:30:00",
+    "title": "Black holes explained",
+    "message_count": 4
+  },
+  {
+    "id": "b2c3d4e5-f6a7-8901-bcde-f01234567891",
+    "created_at": "2024-01-14T09:15:00",
+    "title": "New Conversation",
+    "message_count": 0
+  }
+]
+```
+
+---
+
+## Create a Conversation
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:8001/api/conversations \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+```javascript JavaScript
+const conversation = await api.createConversation();
+```
+</CodeGroup>
+
+`POST /api/conversations` creates a new, empty conversation and returns the full conversation object. The request body must be a valid JSON object — an empty object `{}` is sufficient.
+
+### Request Body
+
+<ParamField body="(empty object)" type="object">
+  No fields are required. Send an empty JSON object `{}`.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string" required>
+  UUID assigned to the new conversation. Store this value — it is required for all message endpoints.
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  ISO 8601 UTC datetime string recording the moment the conversation was created.
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Always `"New Conversation"` at creation time. Updated automatically after the first message.
+</ResponseField>
+
+<ResponseField name="messages" type="array" required>
+  Empty array `[]` — no messages have been sent yet.
+</ResponseField>
+
+**Example response:**
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "created_at": "2024-01-15T10:30:00",
+  "title": "New Conversation",
+  "messages": []
+}
+```
+
+---
+
+## Get a Conversation
+
+<CodeGroup>
+```bash curl
+curl http://localhost:8001/api/conversations/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+```javascript JavaScript
+const conversation = await api.getConversation(conversationId);
+```
+</CodeGroup>
+
+`GET /api/conversations/{conversation_id}` loads a single conversation with its complete message history, including all stage data from every council run.
+
+### Path Parameters
+
+<ParamField path="conversation_id" type="string" required>
+  The UUID of the conversation to retrieve, as returned by `POST /api/conversations` or `GET /api/conversations`.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string" required>
+  The conversation UUID.
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  ISO 8601 UTC datetime string.
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Current conversation title. Updated from `"New Conversation"` after the first message is processed.
+</ResponseField>
+
+<ResponseField name="messages" type="array" required>
+  Full list of messages. User messages contain `role` and `content`. Assistant messages contain `role`, `stage1`, `stage2`, and `stage3`.
+
+  <Expandable title="Assistant message fields">
+    <ResponseField name="role" type="string">
+      Always `"assistant"` for council responses.
+    </ResponseField>
+    <ResponseField name="stage1" type="array">
+      Array of `{model, response}` objects — one per council model.
+    </ResponseField>
+    <ResponseField name="stage2" type="array">
+      Array of `{model, ranking, parsed_ranking}` objects from the peer review stage.
+    </ResponseField>
+    <ResponseField name="stage3" type="object">
+      Single `{model, response}` object — the chairman's synthesized final answer.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Status | Description |
+|--------|-------------|
+| `404` | No conversation with the given `conversation_id` exists on disk. |
+
+<Note>
+  The `label_to_model` mapping and `aggregate_rankings` list are **not** stored in the conversation file — they are ephemeral values computed at request time and returned only by the message endpoints. To see them, call `POST /api/conversations/{id}/message` or inspect the `stage2_complete` SSE event from the streaming endpoint.
+</Note>

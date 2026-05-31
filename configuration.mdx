@@ -1,0 +1,115 @@
+---
+title: "Configure Council Models and Chairman in LLM Council"
+sidebarTitle: "Configuration"
+description: "Customize council members, the Chairman model, storage paths, ports, and CORS settings for your local LLM Council deployment via config.py and .env."
+---
+
+LLM Council intentionally keeps its configuration minimal and centralized. Almost everything you need to change lives in two files: `backend/config.py` for model and storage settings, and `.env` in the project root for secrets. The sections below explain each option, where it lives, and what to watch out for when changing it.
+
+## `backend/config.py`
+
+This file is the single source of truth for which models sit on the council, which model acts as Chairman, where conversations are saved, and which OpenRouter endpoint is used. Open it in any editor to make changes.
+
+```python backend/config.py
+"""Configuration for the LLM Council."""
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# OpenRouter API key
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Council members - list of OpenRouter model identifiers
+COUNCIL_MODELS = [
+    "openai/gpt-5.1",
+    "google/gemini-3-pro-preview",
+    "anthropic/claude-sonnet-4.5",
+    "x-ai/grok-4",
+]
+
+# Chairman model - synthesizes final response
+CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+
+# OpenRouter API endpoint
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Data directory for conversation storage
+DATA_DIR = "data/conversations"
+```
+
+<Warning>
+  `COUNCIL_MODELS` and `CHAIRMAN_MODEL` are hardcoded in `config.py` and are read once at startup. After changing either value you must **restart the backend** for the new configuration to take effect. There is currently no way to update council membership through the UI at runtime.
+</Warning>
+
+## Configuration Variables
+
+<ParamField body="COUNCIL_MODELS" type="list[str]" required>
+  A Python list of OpenRouter model identifier strings. Every model in this list participates in Stage 1 (answering the query) and Stage 2 (peer-reviewing the other answers). The number of council members directly determines how many parallel API requests are made per message and how rich the cross-review will be.
+
+  The default council is:
+  - `openai/gpt-5.1`
+  - `google/gemini-3-pro-preview`
+  - `anthropic/claude-sonnet-4.5`
+  - `x-ai/grok-4`
+</ParamField>
+
+<ParamField body="CHAIRMAN_MODEL" type="str" required>
+  The OpenRouter model identifier for the Chairman — the model that runs Stage 3 and synthesizes the final answer from all council responses and peer-review feedback. The Chairman can be the same model as one of the council members (the default uses `google/gemini-3-pro-preview` for both) or a completely different model. Choose a model known for strong summarization and instruction-following.
+</ParamField>
+
+<ParamField body="OPENROUTER_API_KEY" type="str" required>
+  Loaded at startup from the `.env` file via `python-dotenv`. This key authenticates all requests to the OpenRouter API. It is **never** hardcoded in `config.py` or any other source file — the line `OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")` will return `None` if the `.env` file is absent or the variable is not set, causing every model query to fail.
+</ParamField>
+
+<ParamField body="OPENROUTER_API_URL" type="str">
+  The full URL of the OpenRouter chat completions endpoint: `https://openrouter.ai/api/v1/chat/completions`. This follows the OpenAI-compatible API shape, so the same endpoint is used for every model regardless of the underlying provider. You should rarely if ever need to change this value.
+</ParamField>
+
+<ParamField body="DATA_DIR" type="str">
+  The directory path (relative to the project root) where conversation JSON files are written. Defaults to `data/conversations`. Each conversation is stored as a separate JSON file named by its UUID. The directory is created automatically if it does not exist. You can change this to any path writable by the process running the backend.
+</ParamField>
+
+## Environment File (`.env`)
+
+Create this file in the **project root** alongside `pyproject.toml`:
+
+```bash .env
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+Add `.env` to your `.gitignore` if it isn't already there — committing your API key to a public repository will expose it immediately.
+
+## Choosing Council Models
+
+<Tip>
+  Any model available on OpenRouter can be added to `COUNCIL_MODELS` or set as `CHAIRMAN_MODEL`. Use the format `provider/model-name`, for example `mistralai/mistral-large`, `meta-llama/llama-3.1-70b-instruct`, or `cohere/command-r-plus`. Browse the full catalogue at [openrouter.ai/models](https://openrouter.ai/models). If you want to test a model identifier before committing to it, use the `test_openrouter.py` script included in the project root.
+</Tip>
+
+## CORS Settings
+
+The backend (`backend/main.py`) configures FastAPI's CORS middleware to accept requests from two origins by default:
+
+```python backend/main.py
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+If you run the Vite frontend on a different port (e.g., because 5173 is occupied), add the new origin to the `allow_origins` list and restart the backend. Without a matching entry, the browser will block API requests with a CORS error.
+
+## Port Configuration
+
+| Service | Default Port | Configured In |
+|---|---|---|
+| FastAPI backend | **8001** | `backend/main.py` (uvicorn call at bottom of file) |
+| Vite frontend | **5173** | Vite default; referenced in `frontend/src/api.js` |
+
+<Warning>
+  The backend port is referenced in **two places**: the `uvicorn.run()` call in `backend/main.py` and the base URL constant in `frontend/src/api.js`. If you change the port, you must update both files and restart both servers, otherwise the frontend will send requests to the old port and receive connection errors.
+</Warning>

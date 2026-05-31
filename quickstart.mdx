@@ -1,47 +1,123 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with LLM Council in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install dependencies, add your OpenRouter API key, and launch the LLM Council web app locally with a single start script or two terminal commands."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+LLM Council runs entirely on your local machine — a FastAPI backend talks to OpenRouter on your behalf and a Vite-powered React frontend gives you the chat interface. Follow the steps below to go from a fresh clone to a running app in just a few minutes.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Note>
+  The backend runs on **port 8001** and the frontend runs on **port 5173**. Make sure neither port is occupied by another process before starting.
+</Note>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Check Prerequisites">
+    Before you begin, confirm the following are installed on your system:
+
+    - **Python 3.10 or later** — required by the FastAPI backend
+    - **Node.js** (LTS recommended) — required to run the React frontend
+    - **uv** — the Python package manager used by this project. Install it from [docs.astral.sh/uv](https://docs.astral.sh/uv/) if you don't have it yet
+    - **An OpenRouter API key** — LLM Council routes all model queries through OpenRouter. Sign up at [openrouter.ai](https://openrouter.ai/) and purchase credits (or enable auto top-up) before proceeding
 
     ```bash
-    npm install your-package
+    # Verify Python version
+    python --version
+
+    # Verify Node.js
+    node --version
+
+    # Verify uv
+    uv --version
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Clone the Repository">
+    Clone the project from GitHub and navigate into the project directory:
 
     ```bash
-    your-cli init
+    git clone https://github.com/karpathy/llm-council.git && cd llm-council
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Install Backend Dependencies">
+    Use `uv` to create a virtual environment and install all Python dependencies declared in `pyproject.toml`:
 
     ```bash
-    your-cli start
+    uv sync
     ```
+
+    This installs FastAPI, Uvicorn, httpx, pydantic, and python-dotenv into an isolated environment managed by `uv`.
+  </Step>
+
+  <Step title="Install Frontend Dependencies">
+    Move into the `frontend/` directory, install Node dependencies, then return to the project root:
+
+    ```bash
+    cd frontend && npm install && cd ..
+    ```
+
+    This pulls in React 19, Vite, react-markdown, and the related dev tooling.
+  </Step>
+
+  <Step title="Configure Your API Key">
+    Create a `.env` file in the **project root** (next to `pyproject.toml`) and add your OpenRouter API key:
+
+    ```bash .env
+    OPENROUTER_API_KEY=sk-or-v1-...
+    ```
+
+    The backend reads this value at startup via `python-dotenv`. The key is never hardcoded in source files. If the variable is missing, model queries will fail with authentication errors.
+
+    <Note>
+      Get your key at [openrouter.ai](https://openrouter.ai/). You will need to add credits to your account — OpenRouter charges per-token based on the models you select. Consider enabling automatic top-up so the app doesn't stall mid-session.
+    </Note>
+  </Step>
+
+  <Step title="Start the Application">
+    You can start both servers with a single command or manage them in separate terminals.
+
+    <CodeGroup>
+      ```bash Start Script (Recommended)
+      ./start.sh
+      ```
+
+      ```bash Terminal 1 — Backend
+      uv run python -m backend.main
+      ```
+
+      ```bash Terminal 2 — Frontend
+      cd frontend && npm run dev
+      ```
+    </CodeGroup>
+
+    <Tip>
+      The `./start.sh` script launches both the backend and frontend as background processes and registers a `SIGINT`/`SIGTERM` trap — pressing **Ctrl+C** in the same terminal cleanly shuts down both servers at once. If you run the servers manually in separate terminals you will need to stop each one individually.
+    </Tip>
+  </Step>
+
+  <Step title="Open the App in Your Browser">
+    Once both servers are running, navigate to the frontend in your browser:
+
+    ```
+    http://localhost:5173
+    ```
+
+    You should see the LLM Council chat interface. Type any question and press **Enter** to trigger the three-stage pipeline. The UI will progressively reveal Stage 1 responses, Stage 2 peer reviews, and the Stage 3 Chairman synthesis as each stage completes.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Verifying the Backend
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+If the UI does not load or model queries fail, confirm the backend is healthy by hitting the root health-check endpoint:
+
+```bash
+curl http://localhost:8001/
+```
+
+A healthy backend responds with:
+
+```json
+{"status": "ok", "service": "LLM Council API"}
+```
+
+If you receive a connection error, check that the backend process started without import errors (missing `.env` file or wrong working directory are the most common causes). Always run the backend from the **project root** using `python -m backend.main`, not from inside the `backend/` directory — relative imports in the backend modules depend on this.

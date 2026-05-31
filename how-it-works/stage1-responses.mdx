@@ -1,0 +1,124 @@
+---
+title: "Stage 1: Parallel First Opinions from Every Model"
+sidebarTitle: "Stage 1"
+description: "Stage 1 queries every council model in parallel via asyncio.gather(), filters failures, and hands only successful responses to Stage 2 for peer ranking."
+---
+
+Stage 1 is the council's opening round: every model on the council receives the user's raw question at the same time, answers independently, and returns its response. No model sees any other model's answer during this stage. The result is a set of uninfluenced, diverse first opinions that Stage 2 will evaluate and rank.
+
+## How Parallel Querying Works
+
+The entry point for Stage 1 is `stage1_collect_responses` in `council.py`. It wraps the user's text in an OpenAI-compatible message object and hands the list of `COUNCIL_MODELS` to `query_models_parallel`:
+
+```python
+async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+    messages = [{"role": "user", "content": user_query}]
+
+    # Query all models in parallel
+    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+
+    # Format results
+    stage1_results = []
+    for model, response in responses.items():
+        if response is not None:  # Only include successful responses
+            stage1_results.append({
+                "model": model,
+                "response": response.get('content', '')
+            })
+
+    return stage1_results
+```
+
+`query_models_parallel` in `openrouter.py` creates one async task per model and awaits them all at once with `asyncio.gather()`:
+
+```python
+async def query_models_parallel(
+    models: List[str],
+    messages: List[Dict[str, str]]
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    import asyncio
+
+    # Create tasks for all models
+    tasks = [query_model(model, messages) for model in models]
+
+    # Wait for all to complete
+    responses = await asyncio.gather(*tasks)
+
+    # Map models to their responses
+    return {model: response for model, response in zip(models, responses)}
+```
+
+Because `asyncio.gather()` runs every coroutine concurrently, the total latency for Stage 1 is roughly equal to the *slowest* model, not the *sum* of all model latencies.
+
+## The Individual Model Call
+
+Each task in the gather pool is a call to `query_model`, which posts to the OpenRouter API and extracts the message content:
+
+```python
+async def query_model(
+    model: str,
+    messages: List[Dict[str, str]],
+    timeout: float = 120.0
+) -> Optional[Dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            OPENROUTER_API_URL,
+            headers=headers,
+            json={"model": model, "messages": messages},
+        )
+        response.raise_for_status()
+        message = data['choices'][0]['message']
+        return {
+            'content': message.get('content'),
+            'reasoning_details': message.get('reasoning_details')
+        }
+```
+
+The default timeout is **120 seconds**. If a model does not respond within that window — whether due to a network error, a rate-limit response, or a provider outage — the `except` block catches the exception, logs it, and returns `None`.
+
+## Handling Failures
+
+`None` responses are filtered out in `stage1_collect_responses` before anything is added to `stage1_results`. This means a slow or unavailable model simply does not appear in the Stage 1 output; it does not block the models that did respond. The downstream stages (anonymization, ranking, synthesis) only operate on the successful subset.
+
+The one hard-stop condition is when the filtered list is completely empty — meaning every configured model failed. In that case, `run_full_council` short-circuits and returns an error response before Stage 2 is attempted.
+
+## Stage 1 Response Format
+
+Each successful entry in `stage1_results` is a plain dictionary:
+
+```python
+{
+    "model": "anthropic/claude-sonnet-4.5",
+    "response": "Here is my answer to your question …"
+}
+```
+
+The full `stage1_results` list is passed unchanged to both Stage 2 (for anonymized ranking) and Stage 3 (for the Chairman's context).
+
+## Council Model Configuration
+
+The list of council members comes from `COUNCIL_MODELS` in `config.py`:
+
+```python
+COUNCIL_MODELS = [
+    "openai/gpt-5.1",
+    "google/gemini-3-pro-preview",
+    "anthropic/claude-sonnet-4.5",
+    "x-ai/grok-4",
+]
+```
+
+All values are [OpenRouter model identifiers](https://openrouter.ai/models). Adding or removing a model from this list is the only change required to alter the composition of the council.
+
+## Frontend: Tab View of Responses
+
+The `Stage1` React component renders one tab per successful response. Clicking a tab shows the full text of that model's answer, rendered as Markdown via `ReactMarkdown`. The tab label is the short model name (the segment after the `/` in the OpenRouter identifier, e.g. `gpt-5.1`), while the full identifier is shown as a subheading above the response body.
+
+```jsx
+// Stage1.jsx — tab label extraction
+{resp.model.split('/')[1] || resp.model}
+```
+
+<Note>
+  Model identities are **fully visible** in the Stage 1 tab view. Anonymization only takes effect when the Stage 1 results are handed off to Stage 2. Users reading Stage 1 tabs always know which model produced which response.
+</Note>

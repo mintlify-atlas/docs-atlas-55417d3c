@@ -1,20 +1,57 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "LLM Council: Multi-Model Deliberation for Better Answers"
+sidebarTitle: "Home"
+description: "LLM Council queries multiple AI models in parallel, has them peer-review each other anonymously, and synthesizes a final consensus answer via a Chairman model."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+LLM Council is a local web application that replaces single-model queries with a structured deliberation process. Submit a question, and the council—GPT, Gemini, Claude, Grok, or any OpenRouter-supported model—answers independently, ranks each other's work under anonymous labels, and lets a designated Chairman synthesize the collective wisdom into a single final response.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install dependencies, set your OpenRouter API key, and have the app running in under five minutes.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration">
+    Customize council members, the Chairman model, and storage settings in a single config file.
+  </Card>
+  <Card title="How It Works" icon="diagram-project" href="/how-it-works/overview">
+    Understand the 3-stage deliberation pipeline—from parallel queries to peer rankings to final synthesis.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the FastAPI REST endpoints that power the backend, including SSE streaming.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## The 3-Stage Process
+
+<Steps>
+  <Step title="Stage 1 — First Opinions">
+    Your query is sent to every council model in parallel via OpenRouter. Each model answers independently, and all responses are displayed side-by-side in a tab view so you can inspect them.
+  </Step>
+  <Step title="Stage 2 — Anonymous Peer Review">
+    Each council model receives all Stage 1 responses with model identities stripped (Response A, Response B, …). It evaluates every response and provides a `FINAL RANKING:` in a structured format. The app computes aggregate rank scores across all evaluators.
+  </Step>
+  <Step title="Stage 3 — Chairman Synthesis">
+    The designated Chairman model receives all individual responses plus all peer rankings and distills everything into one comprehensive final answer—the council's collective verdict.
+  </Step>
+</Steps>
+
+## Why LLM Council?
+
+<CardGroup cols={2}>
+  <Card title="Reduce single-model bias" icon="scale-balanced">
+    No single model's blind spots dominate. Peer review surfaces weaknesses before the final answer is written.
+  </Card>
+  <Card title="Full transparency" icon="eye">
+    Every raw response and every raw ranking evaluation is inspectable. Nothing is hidden behind an abstraction.
+  </Card>
+  <Card title="OpenRouter-powered" icon="network-wired">
+    Access GPT, Gemini, Claude, Grok, and hundreds of other models through a single API key—no juggling multiple provider accounts.
+  </Card>
+  <Card title="Local & private" icon="lock">
+    The app runs entirely on your machine. Conversations are stored as JSON files locally—no cloud sync, no telemetry.
+  </Card>
+</CardGroup>
+
+<Note>
+  LLM Council was built as a Saturday hack by Andrej Karpathy to explore multi-model evaluation. It is provided as-is for inspiration. See the [README](https://github.com/karpathy/llm-council) for context.
+</Note>

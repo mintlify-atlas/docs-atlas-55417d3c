@@ -1,0 +1,111 @@
+---
+title: "How LLM Council Saves Conversations to Local JSON Files"
+sidebarTitle: "Storage"
+description: "Understand where LLM Council writes conversation JSON files, what data is persisted across sessions, and what ephemeral metadata only lives in memory."
+---
+
+LLM Council persists every conversation to your local filesystem as a plain JSON file. There is no database, no cloud sync, and no account required. When you restart the app, your conversation history reappears exactly as you left it — with one important exception around ranking metadata that this guide explains in detail.
+
+## Storage location
+
+Conversations are written to `data/conversations/` relative to the project root. This path is controlled by `DATA_DIR` in `backend/config.py`:
+
+```python backend/config.py
+DATA_DIR = "data/conversations"
+```
+
+The directory is created automatically the first time a conversation is saved — you do not need to create it manually. Each conversation becomes a single file named after its UUID:
+
+```
+data/
+└── conversations/
+    ├── 3f8a1b2c-4d5e-6f7a-8b9c-0d1e2f3a4b5c.json
+    ├── a1b2c3d4-e5f6-7890-abcd-ef1234567890.json
+    └── ...
+```
+
+## Conversation file structure
+
+Every file follows this shape, matching what `storage.py` writes:
+
+```json data/conversations/<uuid>.json
+{
+  "id": "<uuid>",
+  "created_at": "2024-01-15T10:30:00",
+  "title": "Auto-generated title",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Your question here"
+    },
+    {
+      "role": "assistant",
+      "stage1": [
+        { "model": "openai/gpt-5.1", "response": "..." },
+        { "model": "anthropic/claude-sonnet-4.5", "response": "..." }
+      ],
+      "stage2": [
+        {
+          "model": "openai/gpt-5.1",
+          "ranking": "Response B provides thorough coverage of X...\n\nFINAL RANKING:\n1. Response B\n2. Response A",
+          "parsed_ranking": ["Response B", "Response A"]
+        }
+      ],
+      "stage3": {
+        "model": "google/gemini-3-pro-preview",
+        "response": "..."
+      }
+    }
+  ]
+}
+```
+
+Each `messages` entry is either a `user` object (with a `content` string) or an `assistant` object (with `stage1`, `stage2`, and `stage3` fields). The `stage2` entries include both the raw evaluation text and the `parsed_ranking` list that was extracted from the `FINAL RANKING:` section.
+
+## What is and is not persisted
+
+**Persisted to disk:**
+
+- User message content
+- Every council member's Stage 1 response (model identifier + full text)
+- Every council member's Stage 2 evaluation (model identifier, raw ranking text, and parsed ranking list)
+- The Chairman's Stage 3 synthesized response
+- Conversation title and creation timestamp
+
+**Not persisted — ephemeral only:**
+
+The `label_to_model` mapping and `aggregate_rankings` that are returned in the API response `metadata` field are **not written to the JSON file**. They are computed fresh during each council run and exist only in the API response payload and in the frontend's in-memory state for that session.
+
+<Warning>
+If you reload the page after a conversation, the aggregate rankings panel (which shows each model's average peer-review position) will not appear for messages from previous sessions. That ranking data was never saved to disk — only the raw Stage 2 text is stored. The raw evaluations are still visible in Stage 2 tabs; only the aggregated leaderboard is missing.
+</Warning>
+
+## Auto-generated titles
+
+When you send the **first message** in a new conversation, LLM Council fires `generate_conversation_title()` in `backend/council.py`. This function calls `google/gemini-2.5-flash` with a prompt that asks for a 3–5 word summary of your question. The resulting title is saved immediately to the conversation file via `update_conversation_title()`, so it survives restarts. In the streaming endpoint, title generation runs as a background `asyncio` task in parallel with Stage 1 to avoid adding latency.
+
+## Storage functions reference
+
+`backend/storage.py` exposes these functions, each of which reads or writes the JSON file for the relevant conversation:
+
+| Function | Description |
+|---|---|
+| `create_conversation(id)` | Creates a new JSON file with empty `messages` and a placeholder title |
+| `get_conversation(id)` | Loads and returns a conversation dict, or `None` if not found |
+| `save_conversation(conversation)` | Overwrites the JSON file with the current conversation dict |
+| `list_conversations()` | Scans `DATA_DIR`, returns metadata for all conversations sorted by `created_at` descending |
+| `add_user_message(id, content)` | Appends a user message and saves |
+| `add_assistant_message(id, stage1, stage2, stage3)` | Appends the full three-stage assistant message and saves |
+| `update_conversation_title(id, title)` | Updates the `title` field and saves |
+
+## Sidebar ordering
+
+The conversation sidebar lists all conversations sorted by `created_at` in descending order — newest conversations appear at the top. This ordering is applied in `list_conversations()` before the list is returned to the frontend.
+
+<Tip>
+To clear all conversations, delete the files inside `data/conversations/`. The directory itself does not need to be removed — `ensure_data_dir()` is called before every write and will recreate it if it is missing. A fresh start is as simple as: `rm data/conversations/*.json`
+</Tip>
+
+<Note>
+There is no built-in search, filtering, or export feature. Because conversations are standard JSON files, you can process them with any JSON-aware tool — `jq`, Python, or a spreadsheet that imports JSON — to extract, analyze, or transform your conversation history however you like.
+</Note>

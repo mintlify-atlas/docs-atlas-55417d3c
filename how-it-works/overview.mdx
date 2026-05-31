@@ -1,0 +1,91 @@
+---
+title: "How LLM Council Deliberates: 3-Stage Pipeline"
+sidebarTitle: "Overview"
+description: "LLM Council deliberates in three stages — parallel first opinions, anonymous peer review, and Chairman synthesis — to deliver a collectively vetted answer."
+---
+
+LLM Council is not a single model giving a single answer. It is a deliberation system: multiple AI models respond independently, then anonymously evaluate one another, and finally a designated Chairman synthesizes everything into one authoritative reply. The entire flow is asynchronous and parallel wherever possible, so the wall-clock time is only slightly longer than a single slow model call.
+
+## Full Data Flow
+
+The diagram below traces exactly how a query travels through the system — from raw user input to the structured JSON payload the frontend receives.
+
+```text
+User Query
+    ↓
+Stage 1: Parallel queries → [individual responses]
+    ↓
+Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankings]
+    ↓
+Aggregate Rankings Calculation → [sorted by avg position]
+    ↓
+Stage 3: Chairman synthesis with full context
+    ↓
+Return: {stage1, stage2, stage3, metadata}
+    ↓
+Frontend: Display with tabs + validation UI
+```
+
+## Why Each Stage Matters
+
+**Stage 1** captures uninfluenced first opinions. Every council model receives only the user's raw question, with no knowledge of what any other model will say. This is the raw material of the deliberation.
+
+**Stage 2** adds accountability without bias. Models must defend their rankings in writing, but they never know whose response they are grading. This prevents any single model from rubber-stamping a peer it knows to be from a "prestigious" provider. The written evaluation also surfaces *why* a response was ranked highly, not just where it placed.
+
+**Stage 3** converts a leaderboard into a usable answer. The Chairman reads every first-opinion response, every peer evaluation, and every ranking, then writes a single synthesized reply that draws on the collective wisdom of the council. No individual model's blind spots dominate the final output.
+
+## Anonymization Strategy
+
+Anonymization is the heart of Stage 2's fairness guarantee. Before any ranking prompts are sent, the backend assigns a letter label to each Stage 1 response:
+
+- `Response A` → first model's output
+- `Response B` → second model's output
+- `Response C` → third model's output
+- … and so on up to `Response Z` for up to 26 council members
+
+The backend constructs a `label_to_model` dictionary — for example `{"Response A": "openai/gpt-5.1", "Response B": "anthropic/claude-sonnet-4.5"}` — and stores it in the API response's `metadata` field. Evaluating models receive only the letter labels; they never see provider names or model identifiers.
+
+De-anonymization happens **entirely on the client side**. The frontend's `Stage2.jsx` component reads the `labelToModel` prop (populated from `metadata.label_to_model`) and runs a string-replace pass over each evaluation's raw text before rendering. The bold model names a user sees in the UI are a display convenience — the underlying evaluation text was written about anonymous letters.
+
+## Graceful Degradation
+
+LLM Council is designed never to fail the whole request because one provider had a bad moment. `query_models_parallel` in `openrouter.py` uses `asyncio.gather()` so all model calls race in parallel. Each individual call has a 120-second timeout enforced by the `httpx.AsyncClient`. If a model returns `None` (network error, rate-limit, or timeout), that entry is simply filtered out before Stage 1 results are assembled — the pipeline continues with however many responses did succeed.
+
+The only hard failure condition is when **all** council models fail to respond. In that case `run_full_council` returns an explicit error dict so the frontend can surface a clear message rather than rendering empty stages.
+
+<Note>
+  Metadata — the `label_to_model` mapping and `aggregate_rankings` list — is **ephemeral**. It is returned in the API response body but is not written to the JSON conversation store on disk. If you reload a past conversation, the stage text is available but the metadata must be re-derived from context.
+</Note>
+
+## Explore Each Stage
+
+<CardGroup cols={2}>
+  <Card
+    title="Stage 1 — Parallel First Opinions"
+    icon="bolt"
+    href="/how-it-works/stage1-responses"
+  >
+    How all council models are queried simultaneously and how failures are filtered before ranking begins.
+  </Card>
+  <Card
+    title="Stage 2 — Anonymous Peer Review"
+    icon="magnifying-glass"
+    href="/how-it-works/stage2-rankings"
+  >
+    How responses are anonymized, how ranking prompts are structured, and how votes are aggregated into a leaderboard.
+  </Card>
+  <Card
+    title="Stage 3 — Chairman Synthesis"
+    icon="crown"
+    href="/how-it-works/stage3-synthesis"
+  >
+    How the Chairman model reads all prior context and produces the single final answer shown to the user.
+  </Card>
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/configuration"
+  >
+    How to change which models sit on the council and which model acts as Chairman.
+  </Card>
+</CardGroup>
