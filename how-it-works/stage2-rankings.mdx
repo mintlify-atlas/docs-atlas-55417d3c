@@ -1,5 +1,5 @@
 ---
-title: "Stage 2: Anonymous Peer Review and Ranking"
+title: "Stage 2: Anonymous Peer Review and Aggregate Ranking"
 sidebarTitle: "Stage 2"
 description: "Stage 2 assigns letter labels to anonymize responses, sends ranking prompts to all council models in parallel, and tallies peer votes into a leaderboard."
 ---
@@ -11,7 +11,7 @@ Stage 2 is where the council holds each other accountable. Every council model r
 At the start of `stage2_collect_rankings`, the backend assigns a sequential letter label to each Stage 1 response:
 
 ```python
-labels = [chr(65 + i) for i in range(len(stage1_results))]  # ['A', 'B', 'C', …]
+labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
 label_to_model = {
     f"Response {label}": result['model']

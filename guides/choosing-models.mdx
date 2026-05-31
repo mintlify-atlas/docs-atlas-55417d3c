@@ -41,14 +41,14 @@ Council members perform peer review in Stage 2, which requires genuine critical 
 
 ### Cost vs. quality tradeoff
 
-With `N` council members, each user message triggers exactly `2N + 2` model calls:
+With `N` council members, the number of model calls per user message depends on whether it is the first message in a conversation:
 
 - **Stage 1** — `N` calls (one per council member, answering the question)
 - **Stage 2** — `N` calls (one per council member, ranking the anonymized responses)
 - **Stage 3** — `1` Chairman call (synthesizing the final answer)
-- **Title generation** — `1` call (only on the first message of a new conversation)
+- **Title generation** — `1` call (`google/gemini-2.5-flash`, first message of a new conversation only)
 
-With the default four-model council, that's **10 calls per message** (8 council calls + 1 Chairman + 1 title). Frontier models can cost several cents per call, so a council of four premium models may cost $0.20–$0.50 per question. Swapping one or two members for capable mid-tier models is a practical way to reduce costs without dramatically reducing quality.
+This gives **`2N + 2`** calls for the first message and **`2N + 1`** calls for every follow-up message in the same conversation. With the default four-model council, that is **10 calls** on the opening message and **9 calls** on each subsequent one. Frontier models can cost several cents per call, so a council of four premium models may cost $0.20–$0.50 per question. Swapping one or two members for capable mid-tier models is a practical way to reduce costs without dramatically reducing quality.
 
 ### Speed
 

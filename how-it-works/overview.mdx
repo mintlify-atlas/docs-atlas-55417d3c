@@ -1,5 +1,5 @@
 ---
-title: "How LLM Council Deliberates: 3-Stage Pipeline"
+title: "How LLM Council Deliberates: Full 3-Stage Pipeline"
 sidebarTitle: "Overview"
 description: "LLM Council deliberates in three stages — parallel first opinions, anonymous peer review, and Chairman synthesis — to deliver a collectively vetted answer."
 ---
@@ -52,6 +52,31 @@ De-anonymization happens **entirely on the client side**. The frontend's `Stage2
 LLM Council is designed never to fail the whole request because one provider had a bad moment. `query_models_parallel` in `openrouter.py` uses `asyncio.gather()` so all model calls race in parallel. Each individual call has a 120-second timeout enforced by the `httpx.AsyncClient`. If a model returns `None` (network error, rate-limit, or timeout), that entry is simply filtered out before Stage 1 results are assembled — the pipeline continues with however many responses did succeed.
 
 The only hard failure condition is when **all** council models fail to respond. In that case `run_full_council` returns an explicit error dict so the frontend can surface a clear message rather than rendering empty stages.
+
+## The Orchestrator: `run_full_council`
+
+All three stages are wired together by `run_full_council` in `council.py`, which is the single entry point called by the API layer for every user message:
+
+```python
+async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+    stage1_results = await stage1_collect_responses(user_query)
+
+    if not stage1_results:
+        return [], [], {"model": "error", "response": "All models failed to respond. Please try again."}, {}
+
+    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+    stage3_result = await stage3_synthesize_final(user_query, stage1_results, stage2_results)
+
+    metadata = {
+        "label_to_model": label_to_model,
+        "aggregate_rankings": aggregate_rankings
+    }
+
+    return stage1_results, stage2_results, stage3_result, metadata
+```
+
+The return tuple gives the API handler everything it needs: the raw per-model responses, the peer evaluations, the Chairman's synthesis, and the ephemeral metadata that powers the frontend's de-anonymization and leaderboard display.
 
 <Note>
   Metadata — the `label_to_model` mapping and `aggregate_rankings` list — is **ephemeral**. It is returned in the API response body but is not written to the JSON conversation store on disk. If you reload a past conversation, the stage text is available but the metadata must be re-derived from context.

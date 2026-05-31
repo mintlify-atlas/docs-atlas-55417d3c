@@ -1,7 +1,7 @@
 ---
-title: "Send Messages and Run the Council Process"
+title: "Send Messages and Run the Three-Stage Council Process"
 sidebarTitle: "Messages"
-description: "Send a user message to run all 3 council stages: model responses, peer review, and chairman synthesis. Returns the complete result in one blocking request."
+description: "Blocking endpoint that triggers all 3 council stages — model responses, peer rankings, and chairman synthesis — returning results in one JSON response."
 ---
 
 The message endpoint is the core of LLM Council. Posting a user message kicks off a complete three-stage deliberation: all council models answer independently (Stage 1), each model then anonymously evaluates and ranks every other model's response (Stage 2), and finally a chairman model synthesizes a definitive answer informed by the rankings (Stage 3). The endpoint blocks until all three stages have completed and returns the full result in a single JSON response.

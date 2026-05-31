@@ -1,5 +1,5 @@
 ---
-title: "Stage 3: Chairman Synthesis of the Final Answer"
+title: "Stage 3: Chairman Synthesis of the Council Final Answer"
 sidebarTitle: "Stage 3"
 description: "Stage 3 gives the Chairman model all Stage 1 responses and Stage 2 peer rankings, and it synthesizes them into one authoritative final answer for the user."
 ---
@@ -26,8 +26,7 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided
-responses to a user's question, and then ranked each other's responses.
+    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
 
 Original Question: {user_query}
 
@@ -37,8 +36,7 @@ STAGE 1 - Individual Responses:
 STAGE 2 - Peer Rankings:
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive,
-accurate answer to the user's original question. Consider:
+Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
 - The individual responses and their insights
 - The peer rankings and what they reveal about response quality
 - Any patterns of agreement or disagreement
